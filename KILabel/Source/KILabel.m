@@ -28,7 +28,6 @@
 NSString * const KILabelLinkTypeKey = @"linkType";
 NSString * const KILabelRangeKey = @"range";
 NSString * const KILabelLinkKey = @"link";
-NSString * const KILabelClassifierKey = @"classifier";
 
 #pragma mark - Private Interface
 
@@ -58,13 +57,7 @@ NSString * const KILabelClassifierKey = @"classifier";
 
 @implementation KILabel
 {
-    // Link classifiers for handling link detection and interaction
-    NSMutableArray *_linkClassifiers;
-    
-    // Built in classifiers used when working with KILinkType based links
-    KILabelLinkClassifier *_userHandleClassifier;
-    KILabelLinkClassifier *_hashtagClassifier;
-    KILabelLinkClassifier *_urlClassifier;
+    NSMutableDictionary *_linkTypeAttributes;
 }
 
 #pragma mark - Construction
@@ -118,8 +111,8 @@ NSString * const KILabelClassifierKey = @"classifier";
     // All links are detectable by default
     _linkDetectionTypes = KILinkTypeOptionAll;
     
-    // Storage for classifiers
-    _linkClassifiers = [[NSMutableArray alloc] init];
+    // Link Type Attributes. Default is empty (no attributes).
+    _linkTypeAttributes = [NSMutableDictionary dictionary];
     
     // Don't underline URL links by default.
     _systemURLStyle = NO;
@@ -128,85 +121,11 @@ NSString * const KILabelClassifierKey = @"classifier";
     // responding to touch.
     _selectedLinkBackgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
     
-    [self setupLinkClassifiers];
-    
     // Establish the text store with our current text
     [self updateTextStoreWithText];
 }
 
-#pragma mark - Builtin Classifiers and Tap Handlers
-
-// Create default classifiers
-- (void)setupLinkClassifiers
-{
-    _userHandleClassifier = [KILabelLinkClassifier linkClassifierWithRegex:[self userHandleRegex]];
-    _hashtagClassifier = [KILabelLinkClassifier linkClassifierWithRegex:[self hashtagRegex]];
-
-    // Use a data detector to find urls in the text
-    NSError *error = nil;
-    NSDataDetector *detector = [[NSDataDetector alloc] initWithTypes:NSTextCheckingTypeLink error:&error];
-    _urlClassifier = [KILabelLinkClassifier linkClassifierWithRegex:detector];
-
-    // Make sure the required link classifiers are attached
-    [self updateDefaultLinkClassifiers];
-}
-
-// Gets Regex that defines user handles
-- (NSRegularExpression *)userHandleRegex
-{
-    static NSRegularExpression *regex = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSError *error = nil;
-        regex = [[NSRegularExpression alloc] initWithPattern:@"(?<!\\w)@([\\w\\_]+)?" options:0 error:&error];
-    });
-
-    return regex;
-}
-
-// Gets Regex that defines hashtags
-- (NSRegularExpression *)hashtagRegex
-{
-    // Setup a regular expression for hashtags
-    static NSRegularExpression *regex = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSError *error = nil;
-        regex = [[NSRegularExpression alloc] initWithPattern:@"(?<!\\w)#([\\w\\_]+)?" options:0 error:&error];
-    });
-
-    return regex;
-}
-
-- (void)setUserHandleLinkTapHandler:(KILinkTapHandler __nullable)userHandleLinkTapHandler
-{
-    _userHandleClassifier.tapHandler = userHandleLinkTapHandler;
-}
-
-- (KILinkTapHandler __nullable)userHandleLinkTapHandler
-{
-    return _userHandleClassifier.tapHandler;
-}
-
-- (void)setHashtagLinkTapHandler:(KILinkTapHandler __nullable)hashtagLinkTapHandler
-{
-    _hashtagClassifier.tapHandler = hashtagLinkTapHandler;
-}
-
-- (KILinkTapHandler __nullable)hashtagLinkTapHandler
-{
-    return _hashtagClassifier.tapHandler;
-}
-
-- (void)setUrlLinkTapHandler:(KILinkTapHandler __nullable)urlLinkTapHandler
-{
-    _urlClassifier.tapHandler = urlLinkTapHandler;
-}
-
-- (KILinkTapHandler __nullable)urlLinkTapHandler
-{
-    return _urlClassifier.tapHandler;
-}
+#pragma mark - Text and Style management
 
 - (void)setAutomaticLinkDetectionEnabled:(BOOL)decorating
 {
@@ -220,94 +139,9 @@ NSString * const KILabelClassifierKey = @"classifier";
 {
     _linkDetectionTypes = linkDetectionTypes;
     
-    // Attach or remove the classifiers for default links
-    [self updateDefaultLinkClassifiers];
-    
     // Make sure the text is updated properly
     [self updateTextStoreWithText];
 }
-
-// Adds or removes default classifiers based on the flags in the linkDetectionTypes
-- (void)updateDefaultLinkClassifiers
-{
-    if (self.linkDetectionTypes & KILinkTypeOptionUserHandle)
-    {
-        [self addLinkClassifier:_userHandleClassifier];
-    }
-    else
-    {
-        [self removeLinkClassifier:_userHandleClassifier];
-    }
-    
-    if (self.linkDetectionTypes & KILinkTypeOptionHashtag)
-    {
-        [self addLinkClassifier:_hashtagClassifier];
-    }
-    else
-    {
-        [self removeLinkClassifier:_hashtagClassifier];
-    }
-    
-    if (self.linkDetectionTypes & KILinkTypeOptionURL)
-    {
-        [self addLinkClassifier:_urlClassifier];
-    }
-    else
-    {
-        [self removeLinkClassifier:_urlClassifier];
-    }
-}
-
-#pragma mark - Custom Link Classifiers Management
-
-- (void)addLinkClassifier:(KILabelLinkClassifier *)classifier
-{
-    // Don't allow multiple adds of the same object
-    if ([_linkClassifiers containsObject:classifier])
-    {
-        return;
-    }
-
-    [_linkClassifiers addObject:classifier];
-
-    [self updateTextStoreWithText];
-}
-
-- (void)removeLinkClassifier:(KILabelLinkClassifier *)classifier
-{
-    // Prevent a change if there's nothing to remove
-    if (![_linkClassifiers containsObject:classifier])
-    {
-        return;
-    }
-
-    [_linkClassifiers removeObject:classifier];
-
-    [self updateTextStoreWithText];
-}
-
-- (KILabelLinkClassifier *)linkClassifierWithTag:(NSInteger)tag
-{
-    for (KILabelLinkClassifier *classifier in _linkClassifiers)
-    {
-        // Only return if the tag matches and its not one of our built in ones.
-        if ((classifier.tag == tag) && [self isCustomClassifier:classifier])
-        {
-            return classifier;
-        }
-    }
-
-    return nil;
-}
-
-- (BOOL)isCustomClassifier:(KILabelLinkClassifier *)classifier
-{
-    return (classifier != _userHandleClassifier) &&
-    (classifier != _hashtagClassifier) &&
-    (classifier != _urlClassifier);
-}
-
-#pragma mark - Text and Style Management
 
 - (NSDictionary *)linkAtPoint:(CGPoint)location
 {
@@ -409,7 +243,7 @@ NSString * const KILabelClassifierKey = @"classifier";
 
 - (NSDictionary*)attributesForLinkType:(KILinkType)linkType
 {
-    NSDictionary *attributes = [self classifierForLinkType:linkType].linkAttributes;
+    NSDictionary *attributes = _linkTypeAttributes[@(linkType)];
     
     if (!attributes)
     {
@@ -421,27 +255,17 @@ NSString * const KILabelClassifierKey = @"classifier";
 
 - (void)setAttributes:(NSDictionary*)attributes forLinkType:(KILinkType)linkType
 {
-    [self classifierForLinkType:linkType].linkAttributes = attributes;
+    if (attributes)
+    {
+        _linkTypeAttributes[@(linkType)] = attributes;
+    }
+    else
+    {
+        [_linkTypeAttributes removeObjectForKey:@(linkType)];
+    }
     
     // Force refresh text
     self.text = self.text;
-}
-
-- (KILabelLinkClassifier *)classifierForLinkType:(KILinkType)linkType
-{
-    switch (linkType)
-    {
-        case KILinkTypeUserHandle:
-            return _userHandleClassifier;
-            
-        case KILinkTypeHashtag:
-            return _hashtagClassifier;
-
-        case KILinkTypeURL:
-            return _urlClassifier;
-    }
-    
-    return nil;
 }
 
 #pragma mark - Text Storage Management
@@ -548,34 +372,134 @@ NSString * const KILabelClassifierKey = @"classifier";
 - (NSArray *)getRangesForLinks:(NSAttributedString *)text
 {
     NSMutableArray *rangesForLinks = [[NSMutableArray alloc] init];
-
-    if (_linkClassifiers.count > 0)
+    
+    if (self.linkDetectionTypes & KILinkTypeOptionUserHandle)
     {
-        [rangesForLinks addObjectsFromArray:[self getLinksFromClassifiers]];
+        [rangesForLinks addObjectsFromArray:[self getRangesForUserHandles:text.string]];
+    }
+    
+    if (self.linkDetectionTypes & KILinkTypeOptionHashtag)
+    {
+        [rangesForLinks addObjectsFromArray:[self getRangesForHashtags:text.string]];
+    }
+    
+    if (self.linkDetectionTypes & KILinkTypeOptionURL)
+    {
+        [rangesForLinks addObjectsFromArray:[self getRangesForURLs:self.attributedText]];
     }
     
     return rangesForLinks;
 }
 
-- (NSArray *)getLinksFromClassifiers
+- (NSArray *)getRangesForUserHandles:(NSString *)text
 {
-    NSMutableArray *links = [NSMutableArray array];
+    NSMutableArray *rangesForUserHandles = [[NSMutableArray alloc] init];
     
-    for (KILabelLinkClassifier *classifier in _linkClassifiers)
+    // Setup a regular expression for user handles and hashtags
+    static NSRegularExpression *regex = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSError *error = nil;
+        regex = [[NSRegularExpression alloc] initWithPattern:@"(?<!\\w)@([\\w\\_]+)?" options:0 error:&error];
+    });
+    
+    // Run the expression and get matches
+    NSArray *matches = [regex matchesInString:text options:0 range:NSMakeRange(0, text.length)];
+    
+    // Add all our ranges to the result
+    for (NSTextCheckingResult *match in matches)
     {
-        NSArray *classifiedLinks = classifier.classifier(self);
+        NSRange matchRange = [match range];
+        NSString *matchString = [text substringWithRange:matchRange];
         
-        for (NSDictionary *link in classifiedLinks)
+        if (![self ignoreMatch:matchString])
         {
-            NSMutableDictionary *mutableLink = [NSMutableDictionary dictionaryWithDictionary:link];
-            mutableLink[KILabelClassifierKey] = classifier;
-            
-            // Make the link immutable and store it in links
-            [links addObject:[NSDictionary dictionaryWithDictionary:mutableLink]];
+            [rangesForUserHandles addObject:@{KILabelLinkTypeKey : @(KILinkTypeUserHandle),
+                                              KILabelRangeKey : [NSValue valueWithRange:matchRange],
+                                              KILabelLinkKey : matchString
+                                            }];
         }
     }
     
-    return links;
+    return rangesForUserHandles;
+}
+
+- (NSArray *)getRangesForHashtags:(NSString *)text
+{
+    NSMutableArray *rangesForHashtags = [[NSMutableArray alloc] init];
+    
+    // Setup a regular expression for user handles and hashtags
+    static NSRegularExpression *regex = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSError *error = nil;
+        regex = [[NSRegularExpression alloc] initWithPattern:@"(?<!\\w)#([\\w\\_]+)?" options:0 error:&error];
+    });
+    
+    // Run the expression and get matches
+    NSArray *matches = [regex matchesInString:text options:0 range:NSMakeRange(0, text.length)];
+    
+    // Add all our ranges to the result
+    for (NSTextCheckingResult *match in matches)
+    {
+        NSRange matchRange = [match range];
+        NSString *matchString = [text substringWithRange:matchRange];
+        
+        if (![self ignoreMatch:matchString])
+        {
+            [rangesForHashtags addObject:@{KILabelLinkTypeKey : @(KILinkTypeHashtag),
+                                           KILabelRangeKey : [NSValue valueWithRange:matchRange],
+                                           KILabelLinkKey : matchString,
+                                        }];
+        }
+    }
+    
+    return rangesForHashtags;
+}
+
+
+- (NSArray *)getRangesForURLs:(NSAttributedString *)text
+{
+    NSMutableArray *rangesForURLs = [[NSMutableArray alloc] init];;
+    
+    // Use a data detector to find urls in the text
+    NSError *error = nil;
+    NSDataDetector *detector = [[NSDataDetector alloc] initWithTypes:NSTextCheckingTypeLink error:&error];
+    
+    NSString *plainText = text.string;
+    
+    NSArray *matches = [detector matchesInString:plainText
+                                         options:0
+                                           range:NSMakeRange(0, text.length)];
+    
+    // Add a range entry for every url we found
+    for (NSTextCheckingResult *match in matches)
+    {
+        NSRange matchRange = [match range];
+        
+        // If there's a link embedded in the attributes, use that instead of the raw text
+        NSString *realURL = [text attribute:NSLinkAttributeName atIndex:matchRange.location effectiveRange:nil];
+        if (realURL == nil)
+            realURL = [plainText substringWithRange:matchRange];
+        
+        if (![self ignoreMatch:realURL])
+        {
+            if ([match resultType] == NSTextCheckingTypeLink)
+            {
+                [rangesForURLs addObject:@{KILabelLinkTypeKey : @(KILinkTypeURL),
+                                           KILabelRangeKey : [NSValue valueWithRange:matchRange],
+                                           KILabelLinkKey : realURL,
+                                        }];
+            }
+        }
+    }
+    
+    return rangesForURLs;
+}
+
+- (BOOL)ignoreMatch:(NSString*)string
+{
+    return [_ignoredKeywords containsObject:[string lowercaseString]];
 }
 
 - (NSAttributedString *)addLinkAttributesToAttributedString:(NSAttributedString *)string linkRanges:(NSArray *)linkRanges
@@ -585,30 +509,19 @@ NSString * const KILabelClassifierKey = @"classifier";
     for (NSDictionary *dictionary in linkRanges)
     {
         NSRange range = [[dictionary objectForKey:KILabelRangeKey] rangeValue];
-        KILabelLinkClassifier *classifier = dictionary[KILabelClassifierKey];
+        KILinkType linkType = [dictionary[KILabelLinkTypeKey] unsignedIntegerValue];
         
-        // Get the attributes for the link from its classifier
-        NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
-        if (classifier.linkAttributes)
-        {
-            [attributes addEntriesFromDictionary:classifier.linkAttributes];
-        }
+        NSDictionary *attributes = [self attributesForLinkType:linkType];
         
-        // Make sure the link text is colored
-        if (attributes[NSForegroundColorAttributeName] == nil)
-        {
-            attributes[NSForegroundColorAttributeName] = self.tintColor;
-        }
-        
-        // If we're using the URL classifier, we may want to use the system style for highlighting
-        // which need link attribute to be set.
-        if (_systemURLStyle && (classifier == _urlClassifier))
-        {
-            attributes[NSLinkAttributeName] = dictionary[KILabelLinkKey];
-        }
-        
-        // Add our attributes
+        // Use our tint color to hilight the link
         [attributedString addAttributes:attributes range:range];
+        
+        // Add an URL attribute if this is a URL
+        if (_systemURLStyle && ((KILinkType)[dictionary[KILabelLinkTypeKey] unsignedIntegerValue] == KILinkTypeURL))
+        {
+            // Add a link attribute using the stored link
+            [attributedString addAttribute:NSLinkAttributeName value:dictionary[KILabelLinkKey] range:range];
+        }
     }
     
     return attributedString;
@@ -717,8 +630,14 @@ NSString * const KILabelClassifierKey = @"classifier";
 
 #pragma mark - Interactions
 
-- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event
-{
+-(BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    NSDictionary *touchedLink = [self linkAtPoint:point];
+    if (touchedLink) { return YES; }
+    return NO;
+}
+
+- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)event {
+    [super touchesBegan:touches withEvent:event];
     _isTouchMoved = NO;
     
     // Get the info for the touched link if there is one
@@ -730,31 +649,31 @@ NSString * const KILabelClassifierKey = @"classifier";
     {
         self.selectedRange = [[touchedLink objectForKey:KILabelRangeKey] rangeValue];
     }
-    else
-    {
-        [super touchesBegan:touches withEvent:event];
-    }
+
 }
 
-- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event
-{
+- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {
     [super touchesMoved:touches withEvent:event];
     
-    _isTouchMoved = YES;
+    CGPoint touchLocation = [[touches anyObject] locationInView:self];
+    NSDictionary *touchedLink = [self linkAtPoint:touchLocation];
+    if (touchedLink) {
+        self.selectedRange = [[touchedLink objectForKey:KILabelRangeKey] rangeValue];
+    } else {
+        _isTouchMoved = YES;
+        self.selectedRange = NSMakeRange(0, 0);
+    }
 }
 
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event
-{
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
     [super touchesEnded:touches withEvent:event];
     
-    // If the user dragged their finger we ignore the touch
-    if (_isTouchMoved)
-    {
+//     If the user dragged their finger we ignore the touch
+    if (_isTouchMoved) {
         self.selectedRange = NSMakeRange(0, 0);
-        
         return;
     }
-    
+
     // Get the info for the touched link if there is one
     NSDictionary *touchedLink;
     CGPoint touchLocation = [[touches anyObject] locationInView:self];
@@ -764,28 +683,61 @@ NSString * const KILabelClassifierKey = @"classifier";
     {
         NSRange range = [[touchedLink objectForKey:KILabelRangeKey] rangeValue];
         NSString *touchedSubstring = [touchedLink objectForKey:KILabelLinkKey];
+        KILinkType linkType = (KILinkType)[[touchedLink objectForKey:KILabelLinkTypeKey] intValue];
         
-        // Check to see if the link is associated with a classifier
-        KILabelLinkClassifier *classifier = [touchedLink objectForKey:KILabelClassifierKey];
-        if (classifier && classifier.tapHandler)
-        {
-            classifier.tapHandler(self, touchedSubstring, range);
-        }
-    }
-    else
-    {
-        [super touchesBegan:touches withEvent:event];
+        [self receivedActionForLinkType:linkType string:touchedSubstring range:range];
     }
     
     self.selectedRange = NSMakeRange(0, 0);
 }
 
-- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event
-{
+- (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
     [super touchesCancelled:touches withEvent:event];
     
+    if (self.selectedRange.length != 0 && self.selectedRange.location != 0) {
+        NSDictionary *touchedLink;
+        CGPoint touchLocation = [[touches anyObject] locationInView:self];
+        touchedLink = [self linkAtPoint:touchLocation];
+        
+        if (touchedLink)
+        {
+            NSRange range = [[touchedLink objectForKey:KILabelRangeKey] rangeValue];
+            NSString *touchedSubstring = [touchedLink objectForKey:KILabelLinkKey];
+            KILinkType linkType = (KILinkType)[[touchedLink objectForKey:KILabelLinkTypeKey] intValue];
+            
+            [self receivedActionForLinkType:linkType string:touchedSubstring range:range];
+        }
+    }
+
     // Make sure we don't leave a selection when the touch is cancelled
     self.selectedRange = NSMakeRange(0, 0);
+}
+
+- (void)receivedActionForLinkType:(KILinkType)linkType string:(NSString*)string range:(NSRange)range
+{
+    switch (linkType)
+    {
+    case KILinkTypeUserHandle:
+        if (_userHandleLinkTapHandler)
+        {
+            _userHandleLinkTapHandler(self, string, range);
+        }
+        break;
+        
+    case KILinkTypeHashtag:
+        if (_hashtagLinkTapHandler)
+        {
+            _hashtagLinkTapHandler(self, string, range);
+        }
+        break;
+        
+    case KILinkTypeURL:
+        if (_urlLinkTapHandler)
+        {
+            _urlLinkTapHandler(self, string, range);
+        }
+        break;
+    }
 }
 
 #pragma mark - Layout manager delegate
@@ -827,73 +779,5 @@ NSString * const KILabelClassifierKey = @"classifier";
     
     return restyled;
 }
-
-@end
-
-#pragma mark - KILabelLinkClassifier
-@implementation KILabelLinkClassifier
-
-- (instancetype)initWithClassifier:(KILinkClassifier)classifier
-{
-    self = [super init];
-    if (self)
-    {
-        _classifier = classifier;
-    }
-    
-    return self;
-}
-
-+ (instancetype)linkClassifierWithRegex:(NSRegularExpression *)regex
-{
-    KILabelLinkClassifier *classifier = [[KILabelLinkClassifier alloc] initWithClassifier:^NSArray *(KILabel *label) {
-        NSMutableArray *rangesForUserHandles = [[NSMutableArray alloc] init];
-        
-        // We run the regex on the label's plain text
-        NSString *text = label.text;
-        
-        // Run the expression and get matches
-        NSArray *matches = [regex matchesInString:text options:0 range:NSMakeRange(0, text.length)];
-        
-        // Add all our ranges to the result
-        for (NSTextCheckingResult *match in matches)
-        {
-            NSRange matchRange = [match range];
-            NSString *matchString = [KILabelLinkClassifier linkStringFromAttributedString:label.attributedText
-                                                                                withRange:matchRange];
-
-            // Add the link if its not in our ignore list
-            if (![label.ignoredKeywords containsObject:[matchString lowercaseString]])
-            {
-                [rangesForUserHandles addObject:@{KILabelRangeKey : [NSValue valueWithRange:matchRange],
-                                                  KILabelLinkKey : matchString
-                                                  }];
-            }
-        }
-        
-        return rangesForUserHandles;
-    }];
-    
-    return classifier;
-}
-
-+ (NSString *)linkStringFromAttributedString:(NSAttributedString *)attrStr withRange:(NSRange)range
-{
-    // Check to see if there's a link attribute in the text, which will be our link text. If not
-    // we'll use the string in the raw text.
-    id realURL = [attrStr attribute:NSLinkAttributeName atIndex:range.location effectiveRange:nil];
-    if (realURL == nil)
-    {
-        realURL = [[attrStr string] substringWithRange:range];
-    }
-    else if ([realURL isKindOfClass:[NSURL class]])
-    {
-        // Link could be an URL, we only allow strings
-        realURL = [realURL absoluteString];
-    }
-    
-    return realURL;
-}
-
 
 @end
