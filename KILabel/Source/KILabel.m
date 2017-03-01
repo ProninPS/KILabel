@@ -117,6 +117,9 @@ NSString * const KILabelLinkKey = @"link";
     // Don't underline URL links by default.
     _systemURLStyle = NO;
     
+    // Enable email detection by default.
+    _detectEmailEnabled = YES;
+    
     // By default we hilight the selected link during a touch to give feedback that we are
     // responding to touch.
     _selectedLinkBackgroundColor = [UIColor colorWithWhite:0.95 alpha:1.0];
@@ -484,6 +487,12 @@ NSString * const KILabelLinkKey = @"link";
         
         if (![self ignoreMatch:realURL])
         {
+            if ([self isDetectEmailEnabled]) {
+                if ([realURL containsString:@"@"]) {
+                    // Do not treat email as touchable link
+                    continue;
+                }
+            }
             if ([match resultType] == NSTextCheckingTypeLink)
             {
                 [rangesForURLs addObject:@{KILabelLinkTypeKey : @(KILinkTypeURL),
