@@ -703,7 +703,7 @@ NSString * const KILabelLinkKey = @"link";
 - (void)touchesCancelled:(NSSet *)touches withEvent:(UIEvent *)event {
     [super touchesCancelled:touches withEvent:event];
     
-    if (self.selectedRange.length != 0 && self.selectedRange.location != 0) {
+    if (self.selectedRange.length != 0) {
         NSDictionary *touchedLink;
         CGPoint touchLocation = [[touches anyObject] locationInView:self];
         touchedLink = [self linkAtPoint:touchLocation];
